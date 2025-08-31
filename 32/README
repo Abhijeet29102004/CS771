@@ -1,0 +1,44 @@
+# Directory strecture
+
+mini-project-1/
+├── datasets
+│   ├── test
+│   │   ├── test_emoticon.csv
+│   │   ├── test_feature.npz
+│   │   └── test_text_seq.csv
+│   ├── train
+│   │   ├── train_emoticon.csv
+│   │   ├── train_feature.npz
+│   │   └── train_text_seq.csv
+│   └── valid
+│       ├── valid_emoticon.csv
+│       ├── valid_feature.npz
+│       └── valid_text_seq.csv
+├── read_data.py
+├── README
+└── your_group_no.py
+
+
+
+1.to download the required libraries here are the commands:
+    for numpy : 
+        pip install numpy
+    
+    for pandas:
+        pip install pandas
+    
+    for tensorflow:
+        pip install tensorflow
+
+    for sklearn:
+        pip install scikit-learn
+
+    for matplotlib:
+        pip install matplotlib
+    
+    for joblib:
+        pip install joblib
+
+
+2.the structure is same of the directory but I have removed the files from train,test and valid folder to run the code
+  it will be needed to put the files in their respective folder.
