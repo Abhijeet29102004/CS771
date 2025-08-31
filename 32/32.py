@@ -38,67 +38,59 @@ class COMBINED_MODEL:
 
     def train(self):
         # Load training datasets
-        emoji_dataset_train = pd.read_csv('datasets\train\train_emoticon.csv')
-        train_data = np.load('datasets\train\train_feature.npz')
-        X_train_deep = train_data['features']  # Features for Logistic Regression
-        y_train_deep = train_data['label']  # Labels for Logistic Regression
+        emoji_dataset_train = pd.read_csv('datasets/train/train_emoticon.csv')
+        train_data = np.load('datasets/train/train_feature.npz')
+        X_train_deep = train_data['features']
+        y_train_deep = train_data['label']
 
-        train_data_path = 'datasets\train\train_text_seq.csv'
+        train_data_path = 'datasets/train/train_text_seq.csv'
         train_dataset = pd.read_csv(train_data_path)
         X_train_text = train_dataset['input_str'].apply(lambda x: [int(digit) for digit in x]).tolist()
-        X_train_text = pad_sequences(X_train_text, maxlen=50, padding='post')  # Padding for CNN-LSTM
+        X_train_text = pad_sequences(X_train_text, maxlen=50, padding='post')
         y_train_text = train_dataset['label'].values
 
-        # Prepare inputs for LSTM
         emoji_to_int = {emoji: idx + 1 for idx, emoji in enumerate(set(''.join(emoji_dataset_train['input_emoticon'])))}
         emoji_dataset_train['encoded_emoticons'] = emoji_dataset_train['input_emoticon'].apply(
             lambda emojis: [emoji_to_int[emoji] for emoji in emojis if emoji in emoji_to_int]
         )
         X_train_emoji = pad_sequences(emoji_dataset_train['encoded_emoticons'], maxlen=10, padding='post')
 
-        # Train LSTM Model
         self.lstm_model = load_model('lstm_model_emoticon.h5')
         self.lstm_model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
         self.lstm_model.fit(X_train_emoji, emoji_dataset_train['label'].values, epochs=10, batch_size=32, validation_split=0.2)
 
-        # Train Logistic Regression Model
-        X_train_deep_flattened = X_train_deep.reshape(X_train_deep.shape[0], -1)  # Flatten features
+        X_train_deep_flattened = X_train_deep.reshape(X_train_deep.shape[0], -1)
         self.logistic_model = joblib.load('model_deep_feature.joblib')
         self.logistic_model.fit(X_train_deep_flattened, y_train_deep)
 
-        # Train CNN-LSTM Model
         self.cnn_lstm_model = load_model('cnn_lstm_model_text_seq.h5')
         self.cnn_lstm_model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
         self.cnn_lstm_model.fit(X_train_text, y_train_text, epochs=10, batch_size=32, validation_split=0.2)
 
-        # Validation datasets
-        emoji_dataset_valid = pd.read_csv('datasets\valid\valid_emoticon.csv')
-        validation_data = np.load('datasets\valid\valid_feature.npz')
-        X_val_deep = validation_data['features']  # Validation features for Logistic Regression
-        y_val_deep = validation_data['label']  # Validation labels for Logistic Regression
+        # Validation datasets (FIXED PATHS)
+        emoji_dataset_valid = pd.read_csv('datasets/valid/valid_emoticon.csv')
+        validation_data = np.load('datasets/valid/valid_feature.npz')
+        X_val_deep = validation_data['features']
+        y_val_deep = validation_data['label']
 
-        val_data_path = 'datasets\valid\valid_text_seq.csv'
+        val_data_path = 'datasets/valid/valid_text_seq.csv'
         val_dataset = pd.read_csv(val_data_path)
         X_val_text = val_dataset['input_str'].apply(lambda x: [int(digit) for digit in x]).tolist()
-        X_val_text = pad_sequences(X_val_text, maxlen=50, padding='post')  # Padding for CNN-LSTM
+        X_val_text = pad_sequences(X_val_text, maxlen=50, padding='post')
         y_val_text = val_dataset['label'].values
 
-        # Prepare inputs for LSTM validation
         emoji_dataset_valid['encoded_emoticons'] = emoji_dataset_valid['input_emoticon'].apply(
             lambda emojis: [emoji_to_int[emoji] for emoji in emojis if emoji in emoji_to_int]
         )
         X_val_emoji = pad_sequences(emoji_dataset_valid['encoded_emoticons'], maxlen=10, padding='post')
 
-        # Predictions and accuracy for LSTM
         y_pred_lstm = np.argmax(self.lstm_model.predict(X_val_emoji), axis=-1)
         accuracy_lstm = accuracy_score(emoji_dataset_valid['label'].values, y_pred_lstm)
 
-        # Predictions and accuracy for Logistic Regression
         X_val_deep_flattened = X_val_deep.reshape(X_val_deep.shape[0], -1)
         y_pred_logistic = self.logistic_model.predict(X_val_deep_flattened)
         accuracy_logistic = accuracy_score(y_val_deep, y_pred_logistic)
 
-        # Predictions and accuracy for CNN-LSTM
         y_pred_cnn_lstm = (self.cnn_lstm_model.predict(X_val_text) > 0.5).astype(int).flatten()
         accuracy_cnn_lstm = accuracy_score(y_val_text, y_pred_cnn_lstm)
 
@@ -106,7 +98,6 @@ class COMBINED_MODEL:
         print(f"LSTM Model Accuracy: {accuracy_lstm * 100:.2f}%")
         print(f"CNN-LSTM Model Accuracy: {accuracy_cnn_lstm * 100:.2f}%")
 
-        # Normalizing accuracies for weighted voting
         total_accuracy = accuracy_logistic + accuracy_lstm + accuracy_cnn_lstm
         weights = {
             'logistic': accuracy_logistic / total_accuracy,
@@ -114,67 +105,48 @@ class COMBINED_MODEL:
             'cnn_lstm': accuracy_cnn_lstm / total_accuracy
         }
         
-        # Combine the predictions using weighted voting
         combined_predictions = np.array([y_pred_logistic, y_pred_lstm, y_pred_cnn_lstm]).T
         weighted_vote_predictions = []
         for votes in combined_predictions:
-            # Apply weighted vote: sum of (weight * prediction) for each model
             weighted_sum = (weights['logistic'] * votes[0] +
                             weights['lstm'] * votes[1] +
                             weights['cnn_lstm'] * votes[2])
-
-            # Final prediction is based on whether the weighted sum is greater than half the sum of weights
             final_prediction = 1 if weighted_sum > 0.5 else 0
             weighted_vote_predictions.append(final_prediction)
 
         weighted_vote_predictions = np.array(weighted_vote_predictions)
-
-        # Calculate accuracy of the ensemble model
-        true_labels = emoji_dataset_valid['label'].values  # True labels
+        true_labels = emoji_dataset_valid['label'].values
         accuracy = accuracy_score(true_labels, weighted_vote_predictions)
-
         print(f"Weighted Combined Model Accuracy: {accuracy * 100:.2f}%")
 
-
-    
-        # Load test datasets
-        emoji_dataset_test = pd.read_csv('datasets\test\test_emoticon.csv')
+        # Load test datasets (FIXED PATHS)
+        emoji_dataset_test = pd.read_csv('datasets/test/test_emoticon.csv')
         test_data = np.load('datasets/test/test_feature.npz')
         X_test_deep = test_data['features']
-       
 
-        test_data_path = 'datasets\test\test_text_seq.csv'
+        test_data_path = 'datasets/test/test_text_seq.csv'
         test_dataset = pd.read_csv(test_data_path)
         X_test_text = test_dataset['input_str'].apply(lambda x: [int(digit) for digit in x]).tolist()
         X_test_text = pad_sequences(X_test_text, maxlen=50, padding='post')
 
-        # Prepare inputs for LSTM
         emoji_to_int = {emoji: idx + 1 for idx, emoji in enumerate(set(''.join(emoji_dataset_test['input_emoticon'])))}
         emoji_dataset_test['encoded_emoticons'] = emoji_dataset_test['input_emoticon'].apply(
             lambda emojis: [emoji_to_int[emoji] for emoji in emojis if emoji in emoji_to_int]
         )
 
-        # Example: Define the maximum emoji index you have seen during training
-        MAX_EMOJI_INDEX = 214  # Based on your current error message
+        MAX_EMOJI_INDEX = 214
 
         def preprocess_emojis(emoji_data, max_index=MAX_EMOJI_INDEX):
-            # Replace any emoji with index > MAX_EMOJI_INDEX with a special "unknown" index
             return [[min(emoji, max_index) for emoji in seq] for seq in emoji_data]
 
-        # Apply this preprocessing to your test data
         X_test_emoji = preprocess_emojis(emoji_dataset_test['encoded_emoticons'])
         X_test_emoji = pad_sequences(X_test_emoji, maxlen=10, padding='post')
 
-        # Predictions for each model
         y_pred_lstm = np.argmax(self.lstm_model.predict(X_test_emoji), axis=-1)
         X_test_deep_flattened = X_test_deep.reshape(X_test_deep.shape[0], -1)
         y_pred_logistic = self.logistic_model.predict(X_test_deep_flattened)
         y_pred_cnn_lstm = (self.cnn_lstm_model.predict(X_test_text) > 0.5).astype(int).flatten()
         
-        
-       
-
-        # Combine predictions using weighted voting
         combined_predictions_test = np.array([y_pred_logistic, y_pred_lstm, y_pred_cnn_lstm]).T
         weighted_vote_predictions_test = []
         for votes in combined_predictions_test:
@@ -185,10 +157,6 @@ class COMBINED_MODEL:
             weighted_vote_predictions_test.append(final_prediction)
 
         weighted_vote_predictions_test = np.array(weighted_vote_predictions_test)
-
-       
-
-        # Save test predictions
         np.savetxt('weighted_vote_predictions_test.txt', weighted_vote_predictions_test, fmt='%d', header='Weighted Vote Test Predictions')
         print("Prediction saved in weighted_vote_predictions_test.txt")
 
@@ -371,7 +339,8 @@ class LogisticRegressionModel:
         plt.title('Logistic Regression Performance with Varying Training Data Sizes')
         plt.legend()
         plt.grid()
-        plt.show()
+        plt.savefig('logistic_regression_plot.png')  # Save instead of show
+        plt.close()  # Close the plot so script continues
 
     def test_model(self, output_file_path='pred_deepfeat_class.txt'):
         """Test the saved model on the test dataset."""
@@ -474,7 +443,7 @@ class EmojiLSTMModel:
         test_dataset = pd.read_csv(test_path)
 
         # Create a mapping for emojis to integers based on the training dataset
-        emoji_to_int = {emoji: idx + 1 for idx, emoji in enumerate(set(''.join(pd.read_csv('/kaggle/input/miniproject1/train_emoticon.csv')['input_emoticon'])))}
+        emoji_to_int = {emoji: idx + 1 for idx, emoji in enumerate(set(''.join(pd.read_csv('datasets/train/train_emoticon.csv')['input_emoticon'])))}
 
         # Function to convert emoji sequences to integer sequences
         def convert_to_integer_sequence(emojis):
@@ -508,15 +477,15 @@ if __name__=='__main__':
   emoji_model = EmojiLSTMModel()
 
   # Call the train function
-  emoji_model.train('datasets\train\train_emoticon.csv', 'datasets\valid\valid_emoticon.csv')
+  emoji_model.train('datasets/train/train_emoticon.csv', 'datasets/valid/valid_emoticon.csv')
 
   # Call the predict function
-  emoji_model.predict('datasets\test\test_emoticon.csv')
+  emoji_model.predict('datasets/test/test_emoticon.csv')
   
 
-  train_file = 'datasets\train\train_feature.npz'
-  val_file = 'datasets\train\valid_feature.npz'
-  test_file = 'datasets\train\test_feature.npz'
+  train_file = 'datasets/train/train_feature.npz'
+  val_file = 'datasets/valid/valid_feature.npz'
+  test_file = 'datasets/test/test_feature.npz'
     
     # Instantiate the model class
   logistic_model = LogisticRegressionModel(train_file, val_file, test_file)
@@ -543,8 +512,8 @@ cnn_lstm = CNNLSTMModel(
 )
 
 # Paths to training and validation datasets
-train_data_path = 'datasets\train\train_text_seq.csv'
-val_data_path = 'datasets\valid\valid_text_seq.csv'
+train_data_path = 'datasets/train/train_text_seq.csv'
+val_data_path = 'datasets/valid/valid_text_seq.csv'
 
 # Load and preprocess the data
 X_train, X_val, y_train_encoded, y_val_encoded = cnn_lstm.load_data(train_data_path, val_data_path)
@@ -565,7 +534,7 @@ cnn_lstm.save_model('cnn_lstm_model_text_seq.h5')
 saved_model = CNNLSTMModel.load_saved_model('cnn_lstm_model_text_seq.h5')
 
 # Path to the test dataset and output file for predictions
-test_data_path = 'datasets\test\test_text_seq.csv'
+test_data_path = 'datasets/test/test_text_seq.csv'
 output_file_path = 'pred_textseq_class.txt'
 
 # Make predictions and save them to the output file
